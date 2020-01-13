@@ -10,6 +10,7 @@ import (
 
 var (
 	ErrTxInvalidSliceSize = errors.New("SPI write and read slices must be same size")
+	ErrNoPinChangeChannel = errors.New("machine: no GPIOTE channel available for pin interrupt")
 )
 
 type PinMode uint8
@@ -20,6 +21,18 @@ const (
 	PinInputPulldown PinMode = PinOutput | (nrf.GPIO_PIN_CNF_PULL_Pulldown << nrf.GPIO_PIN_CNF_PULL_Pos)
 	PinOutput        PinMode = (nrf.GPIO_PIN_CNF_DIR_Output << nrf.GPIO_PIN_CNF_DIR_Pos) | (nrf.GPIO_PIN_CNF_INPUT_Disconnect << nrf.GPIO_PIN_CNF_INPUT_Pos)
 )
+
+type PinChange uint8
+
+// Pin change interrupt constants for SetInterrupt.
+const (
+	PinRising  PinChange = nrf.GPIOTE_CONFIG_POLARITY_LoToHi
+	PinFalling PinChange = nrf.GPIOTE_CONFIG_POLARITY_HiToLo
+	PinToggle  PinChange = nrf.GPIOTE_CONFIG_POLARITY_Toggle
+)
+
+// Callbacks to be called for pins configured with SetInterrupt.
+var pinCallbacks [len(nrf.GPIOTE.CONFIG)]func(Pin)
 
 // Configure this pin with the given configuration.
 func (p Pin) Configure(config PinConfig) {
@@ -57,6 +70,66 @@ func (p Pin) PortMaskClear() (*uint32, uint32) {
 func (p Pin) Get() bool {
 	port, pin := p.getPortPin()
 	return (port.IN.Get()>>pin)&1 != 0
+}
+
+// SetInterrupt sets an interrupt to be executed when a particular pin changes
+// state. Note that the previous pin state (input, output) is ignored, therefore
+// you do not need to configure this pin before setting a callback.
+//
+// This call will replace a previously set callback on this pin. You can pass a
+// nil func to unset the pin change interrupt. If you do so, the change
+// parameter is ignored and can be set to any value (such as 0).
+func (p Pin) SetInterrupt(change PinChange, callback func(Pin)) error {
+	// Some variables to easily check whether a channel was already configured
+	// as an event channel for the given pin.
+	// This is not just an optimization, this is requred: the datasheet says
+	// that configuring more than one channel for a given pin results in
+	// unpredictable behavior.
+	expectedConfigMask := uint32(nrf.GPIOTE_CONFIG_MODE_Msk | nrf.GPIOTE_CONFIG_PSEL_Msk)
+	expectedConfig := nrf.GPIOTE_CONFIG_MODE_Event<<nrf.GPIOTE_CONFIG_MODE_Pos |
+		uint32(p)<<nrf.GPIOTE_CONFIG_PSEL_Pos
+
+	foundChannel := false
+	for i := range nrf.GPIOTE.CONFIG {
+		config := nrf.GPIOTE.CONFIG[i].Get()
+		if config == 0 || config&expectedConfigMask == expectedConfig {
+			// Found an empty GPIOTE channel or one that was already configured
+			// for this pin.
+			if callback == nil {
+				// Disable this channel.
+				nrf.GPIOTE.INTENCLR.Set(uint32(1 << i))
+				pinCallbacks[i] = nil
+				return nil
+			}
+			// Enable this channel with the given callback.
+			nrf.GPIOTE.CONFIG[i].Set(nrf.GPIOTE_CONFIG_MODE_Event<<nrf.GPIOTE_CONFIG_MODE_Pos |
+				uint32(p)<<nrf.GPIOTE_CONFIG_PSEL_Pos |
+				uint32(change)<<nrf.GPIOTE_CONFIG_POLARITY_Pos)
+			nrf.GPIOTE.INTENSET.Set(uint32(1 << i))
+			pinCallbacks[i] = callback
+			foundChannel = true
+			break
+		}
+	}
+
+	if !foundChannel {
+		return ErrNoPinChangeChannel
+	}
+
+	// Set and enable the GPIOTE interrupt. It's not a problem if this happens
+	// more than once.
+	interrupt.New(nrf.IRQ_GPIOTE, func(interrupt.Interrupt) {
+		for i := range nrf.GPIOTE.EVENTS_IN {
+			if nrf.GPIOTE.EVENTS_IN[i].Get() != 0 {
+				nrf.GPIOTE.EVENTS_IN[i].Set(0)
+				pin := Pin((nrf.GPIOTE.CONFIG[i].Get() & nrf.GPIOTE_CONFIG_PSEL_Msk) >> nrf.GPIOTE_CONFIG_PSEL_Pos)
+				pinCallbacks[i](pin)
+			}
+		}
+	}).Enable()
+
+	// Everything was configured correctly.
+	return nil
 }
 
 // UART on the NRF.
