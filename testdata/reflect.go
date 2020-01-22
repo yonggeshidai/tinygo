@@ -28,6 +28,10 @@ type (
 	}
 )
 
+// To test Type.NumMethod.
+func (n myint) foo() {}
+func (n myint) bar() {}
+
 func main() {
 	println("matching types")
 	println(reflect.TypeOf(int(3)) == reflect.TypeOf(int(5)))
@@ -111,6 +115,10 @@ func main() {
 		&linkedList{
 			foo: 42,
 		},
+		// interfaces
+		struct {
+			x interface{}
+		}{},
 	} {
 		showValue(reflect.ValueOf(v), "")
 	}
@@ -280,6 +288,9 @@ func showValue(rv reflect.Value, indent string) {
 	}
 	if !rt.Comparable() {
 		print(" comparable=false")
+	}
+	if rt.NumMethod() != 0 {
+		print(" methods=", rt.NumMethod())
 	}
 	println()
 	switch rt.Kind() {
