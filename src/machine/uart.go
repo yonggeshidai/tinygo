@@ -1,4 +1,4 @@
-// +build avr nrf sam sifive stm32
+// +build avr esp8266 nrf sam sifive stm32
 
 package machine
 
