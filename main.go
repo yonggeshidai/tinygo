@@ -658,6 +658,35 @@ func getDefaultPort() (port string, err error) {
 	return d[0], nil
 }
 
+// runGoList runs the `go list` command but using the configuration used for
+// TinyGo.
+func runGoList(config *compileopts.Config, flagJSON, flagDeps bool, pkgs []string) error {
+	tempGoroot, err := loader.CreateTemporaryGoroot(config)
+	if tempGoroot != "" {
+		defer os.RemoveAll(tempGoroot)
+	}
+	if err != nil {
+		return err
+	}
+	args := []string{"list"}
+	if flagJSON {
+		args = append(args, "-json")
+	}
+	if flagDeps {
+		args = append(args, "-deps")
+	}
+	if len(config.BuildTags()) != 0 {
+		args = append(args, "-tags", strings.Join(config.BuildTags(), " "))
+	}
+	args = append(args, pkgs...)
+	cmd := exec.Command("go", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = append(os.Environ(), "GOROOT="+tempGoroot)
+	cmd.Run()
+	return nil
+}
+
 func usage() {
 	fmt.Fprintln(os.Stderr, "TinyGo is a Go compiler for small places.")
 	fmt.Fprintln(os.Stderr, "version:", version)
@@ -669,6 +698,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "  flash: compile and flash to the device")
 	fmt.Fprintln(os.Stderr, "  gdb:   run/flash and immediately enter GDB")
 	fmt.Fprintln(os.Stderr, "  env:   list environment variables used during build")
+	fmt.Fprintln(os.Stderr, "  list:  run go list using the TinyGo root")
 	fmt.Fprintln(os.Stderr, "  clean: empty cache directory ("+goenv.Get("GOCACHE")+")")
 	fmt.Fprintln(os.Stderr, "  help:  print this help text")
 	fmt.Fprintln(os.Stderr, "\nflags:")
@@ -712,6 +742,13 @@ func handleCompilerError(err error) {
 }
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Fprintln(os.Stderr, "No command-line arguments supplied.")
+		usage()
+		os.Exit(1)
+	}
+	command := os.Args[1]
+
 	outpath := flag.String("o", "", "output filename")
 	opt := flag.String("opt", "z", "optimization level: 0, 1, 2, s, z")
 	gc := flag.String("gc", "", "garbage collector to use (none, leaking, conservative)")
@@ -732,12 +769,11 @@ func main() {
 	wasmAbi := flag.String("wasm-abi", "js", "WebAssembly ABI conventions: js (no i64 params) or generic")
 	heapSize := flag.String("heap-size", "1M", "default heap size in bytes (only supported by WebAssembly)")
 
-	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "No command-line arguments supplied.")
-		usage()
-		os.Exit(1)
+	var flagJSON, flagDeps *bool
+	if command == "list" {
+		flagJSON = flag.Bool("json", false, "print data in JSON format")
+		flagDeps = flag.Bool("deps", false, "")
 	}
-	command := os.Args[1]
 
 	flag.CommandLine.Parse(os.Args[2:])
 	options := &compileopts.Options{
@@ -875,6 +911,18 @@ func main() {
 		fmt.Printf("build tags:        %s\n", strings.Join(config.BuildTags(), " "))
 		fmt.Printf("garbage collector: %s\n", config.GC())
 		fmt.Printf("scheduler:         %s\n", config.Scheduler())
+	case "list":
+		config, err := builder.NewConfig(options)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			usage()
+			os.Exit(1)
+		}
+		err = runGoList(config, *flagJSON, *flagDeps, flag.Args())
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "failed to run `go list`:", err)
+			os.Exit(1)
+		}
 	case "clean":
 		// remove cache directory
 		err := os.RemoveAll(goenv.Get("GOCACHE"))

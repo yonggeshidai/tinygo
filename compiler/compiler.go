@@ -31,9 +31,6 @@ func init() {
 	llvm.InitializeAllAsmPrinters()
 }
 
-// The TinyGo import path.
-const tinygoPath = "github.com/tinygo-org/tinygo"
-
 // functionsUsedInTransform is a list of function symbols that may be used
 // during TinyGo optimization passes so they have to be marked as external
 // linkage until all TinyGo passes have finished.
@@ -187,50 +184,21 @@ func (c *Compiler) Compile(mainPath string) []error {
 	if err != nil {
 		return []error{err}
 	}
+	tmpgoroot, err := loader.CreateTemporaryGoroot(c.Config)
+	if err != nil {
+		return []error{err}
+	}
+	defer os.RemoveAll(tmpgoroot)
 	lprogram := &loader.Program{
 		Build: &build.Context{
 			GOARCH:      c.GOARCH(),
 			GOOS:        c.GOOS(),
-			GOROOT:      goenv.Get("GOROOT"),
+			GOROOT:      tmpgoroot,
 			GOPATH:      goenv.Get("GOPATH"),
 			CgoEnabled:  c.CgoEnabled(),
 			UseAllFiles: false,
 			Compiler:    "gc", // must be one of the recognized compilers
 			BuildTags:   c.BuildTags(),
-		},
-		OverlayBuild: &build.Context{
-			GOARCH:      c.GOARCH(),
-			GOOS:        c.GOOS(),
-			GOROOT:      goenv.Get("TINYGOROOT"),
-			GOPATH:      overlayGopath,
-			CgoEnabled:  c.CgoEnabled(),
-			UseAllFiles: false,
-			Compiler:    "gc", // must be one of the recognized compilers
-			BuildTags:   c.BuildTags(),
-		},
-		OverlayPath: func(path string) string {
-			// Return the (overlay) import path when it should be overlaid, and
-			// "" if it should not.
-			if strings.HasPrefix(path, tinygoPath+"/src/") {
-				// Avoid issues with packages that are imported twice, one from
-				// GOPATH and one from TINYGOPATH.
-				path = path[len(tinygoPath+"/src/"):]
-			}
-			switch path {
-			case "machine", "os", "reflect", "runtime", "runtime/interrupt", "runtime/volatile", "sync", "testing", "internal/reflectlite":
-				return path
-			default:
-				if strings.HasPrefix(path, "device/") || strings.HasPrefix(path, "examples/") {
-					return path
-				} else if path == "syscall" {
-					for _, tag := range c.BuildTags() {
-						if tag == "baremetal" || tag == "darwin" {
-							return path
-						}
-					}
-				}
-			}
-			return ""
 		},
 		TypeChecker: types.Config{
 			Sizes: &StdSizes{
