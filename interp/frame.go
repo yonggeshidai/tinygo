@@ -91,7 +91,8 @@ func (fr *frame) evalBasicBlock(bb, incoming llvm.BasicBlock, indent string) (re
 		case !inst.IsALoadInst().IsNil():
 			operand := fr.getLocal(inst.Operand(0)).(*LocalValue)
 			var value llvm.Value
-			if !operand.IsConstant() || inst.IsVolatile() || (!operand.Underlying.IsAConstantExpr().IsNil() && operand.Underlying.Opcode() == llvm.BitCast) {
+			if inst.IsVolatile() || fr.Eval.isDirty(operand.Value()) {
+				fr.Eval.markDirty(operand.Value())
 				value = fr.builder.CreateLoad(operand.Value(), inst.Name())
 			} else {
 				value = operand.Load()
@@ -103,7 +104,8 @@ func (fr *frame) evalBasicBlock(bb, incoming llvm.BasicBlock, indent string) (re
 		case !inst.IsAStoreInst().IsNil():
 			value := fr.getLocal(inst.Operand(0))
 			ptr := fr.getLocal(inst.Operand(1))
-			if inst.IsVolatile() {
+			if inst.IsVolatile() || fr.Eval.isDirty(ptr.Value()) {
+				fr.Eval.markDirty(ptr.Value())
 				fr.builder.CreateStore(value.Value(), ptr.Value())
 			} else {
 				ptr.Store(value.Value())
