@@ -82,7 +82,7 @@ commands:
           key: wasi-libc-sysroot-systemclang-v0
           paths:
             - lib/wasi-libc/sysroot
-      - run: go test -v ./cgo ./compileopts ./interp ./transform .
+      - run: go test -v ./cgo ./compileopts ./compiler ./interp ./transform .
       - run: make gen-device -j4
       - run: make smoketest
       - save_cache:
