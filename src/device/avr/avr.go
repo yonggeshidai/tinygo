@@ -15,4 +15,4 @@ func Asm(asm string)
 //             "value":  1
 //             "result": &dest,
 //         })
-func AsmFull(asm string, regs map[string]interface{})
+func AsmFull(asm string, regs map[string]interface{}) uintptr

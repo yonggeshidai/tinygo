@@ -50,11 +50,7 @@ func Asm(asm string)
 //             "value":  1
 //             "result": &dest,
 //         })
-func AsmFull(asm string, regs map[string]interface{})
-
-// ReadRegister returns the contents of the specified register. The register
-// must be a processor register, reachable with the "mov" instruction.
-func ReadRegister(name string) uintptr
+func AsmFull(asm string, regs map[string]interface{}) uintptr
 
 // Run the following system call (SVCall) with 0 arguments.
 func SVCall0(num uintptr) uintptr
